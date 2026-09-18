@@ -35,14 +35,13 @@ jobs:
 
             npm ci
             npm run build
+            npm run migration:run
 
             if command -v pm2 >/dev/null 2>&1; then
               if pm2 describe main >/dev/null 2>&1; then
-                pm2 restart main --update-env
-              elif pm2 describe 0 >/dev/null 2>&1; then
-                pm2 restart 0 --update-env
+                pm2 reload ecosystem.config.js --update-env
               else
-                pm2 start dist/main.js --name main
+                pm2 start ecosystem.config.js
               fi
               pm2 save
             elif systemctl list-unit-files | grep -q '^fastride-server.service'; then

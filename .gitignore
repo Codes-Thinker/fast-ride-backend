@@ -15,6 +15,11 @@ build/
 .env
 .env.local
 .env.*.local
+env
+
+# SSH keys / secrets
+*.pem
+*.key
 
 # IDE
 .vscode/
