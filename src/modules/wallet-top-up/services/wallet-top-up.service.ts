@@ -208,6 +208,8 @@ export class WalletTopUpService {
 
   /** Browser return from the Card Page Redirection checkout (pp_ResponseCode "121" = payment confirmed). */
   async handleJazzCashCallback(payload: Record<string, string>) {
+    this.logger.log(`JazzCash callback received: ${JSON.stringify(payload)}`);
+
     const isHashValid = this.jazzCashService.verifySecureHash(payload);
     const txnRefNo = payload['pp_TxnRefNo'];
 
@@ -242,6 +244,8 @@ export class WalletTopUpService {
 
   /** REST IPN listener — server-to-server, must ack within 60s regardless of payment outcome. */
   async handleJazzCashIpn(payload: Record<string, string>) {
+    this.logger.log(`JazzCash IPN received: ${JSON.stringify(payload)}`);
+
     const isHashValid = this.jazzCashService.verifySecureHash(payload);
     const txnRefNo = payload['pp_TxnRefNo'];
 
@@ -267,7 +271,9 @@ export class WalletTopUpService {
     // Always ack "received" — this only confirms delivery of the IPN, not
     // the payment's own outcome, which the payload's pp_ResponseCode already
     // carries (121 success, 199/999/other fail).
-    return this.jazzCashService.buildIpnAckResponse();
+    const ack = this.jazzCashService.buildIpnAckResponse();
+    this.logger.log(`JazzCash IPN ack sent for txnRefNo=${txnRefNo}: ${JSON.stringify(ack)}`);
+    return ack;
   }
 
   /** Shared by the Card redirect callback and the IPN listener — both carry the same pp_ResponseCode "121" success convention. */
