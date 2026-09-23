@@ -106,14 +106,23 @@ export class WalletTopUpService {
 
     await this.walletTopUpRepository.save(topUp);
 
-    const response = await this.jazzCashService.debitMWallet({
-      txnRefNo: topUp.txnRefNo,
-      amount,
-      billReference: topUp.billReference as string,
-      description: `FastRide wallet top-up ${topUp.id}`,
-      cnicLast6: user.cnic.slice(-6),
-      mobileNumber,
-    });
+    let response: Record<string, any>;
+
+    try {
+      response = await this.jazzCashService.debitMWallet({
+        txnRefNo: topUp.txnRefNo,
+        amount,
+        billReference: topUp.billReference as string,
+        description: `FastRide wallet top-up ${topUp.id}`,
+        cnicLast6: user.cnic.slice(-6),
+        mobileNumber,
+      });
+    } catch (error) {
+      topUp.status = 'failed';
+      topUp.jazzcashResponseMessage = (error as Error).message;
+      await this.walletTopUpRepository.save(topUp);
+      throw error;
+    }
 
     await this.applyMWalletResult(topUp, response);
 
@@ -303,8 +312,12 @@ export class WalletTopUpService {
     } else if (this.jazzCashService.isPaymentSuccessCode(responseCode)) {
       topUp.status = 'completed';
       topUp.paidAt = topUp.paidAt ?? new Date();
+    } else if (this.jazzCashService.isPendingCode(responseCode)) {
+      // 124/157 — still in progress on JazzCash's side; leave as pending
+      // rather than failing it outright, per JazzCash's response mapping.
+      topUp.status = 'pending';
     } else if (topUp.status === 'pending') {
-      // Non-121 codes on a still-pending top-up mean the attempt failed;
+      // Any other code on a still-pending top-up means the attempt failed;
       // an already-completed top-up must not be flipped back by a stale retry.
       topUp.status = 'failed';
     }
@@ -375,6 +388,9 @@ export class WalletTopUpService {
       if (this.jazzCashService.isPaymentSuccessCode(paymentResponseCode)) {
         topUp.status = 'completed';
         topUp.paidAt = topUp.paidAt ?? new Date();
+      } else if (!this.jazzCashService.isPendingCode(paymentResponseCode)) {
+        // Anything other than 121 (success) or 124/157 (still pending) is a final failure.
+        topUp.status = 'failed';
       }
     }
 

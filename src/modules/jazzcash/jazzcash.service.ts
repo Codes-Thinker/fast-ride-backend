@@ -111,6 +111,11 @@ export class JazzCashService {
     return responseCode === '121';
   }
 
+  /** pp_ResponseCode "124"/"157" — the transaction is still in progress on JazzCash's side, not yet a final outcome. */
+  isPendingCode(responseCode: string | undefined | null): boolean {
+    return responseCode === '124' || responseCode === '157';
+  }
+
   generateTxnRefNo(): string {
     const random = crypto.randomInt(100000, 999999);
     return `T${Date.now()}${random}`;
@@ -164,7 +169,8 @@ export class JazzCashService {
     const data = (await response.json()) as Record<string, any>;
 
     if (!this.verifySecureHash(data)) {
-      this.logger.warn(`MWallet debit response secure hash mismatch for txnRefNo=${params.txnRefNo}`);
+      this.logger.error(`MWallet debit response secure hash mismatch for txnRefNo=${params.txnRefNo}`);
+      throw new Error('JazzCash MWallet debit response failed secure hash verification');
     }
 
     return data;
@@ -233,7 +239,8 @@ export class JazzCashService {
       const data = (await response.json()) as Record<string, any>;
 
       if (!this.verifySecureHash(data)) {
-        this.logger.warn(`Status Inquiry response secure hash mismatch for txnRefNo=${txnRefNo}`);
+        this.logger.error(`Status Inquiry response secure hash mismatch for txnRefNo=${txnRefNo}`);
+        throw new Error('JazzCash Status Inquiry response failed secure hash verification');
       }
 
       return data;
