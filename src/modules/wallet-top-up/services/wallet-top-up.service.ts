@@ -8,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, In, Repository } from 'typeorm';
 import { getJazzCashConfig } from '../../../config/jazzcash.config';
+import { EmailService } from '../../auth/services/email.service';
 import { JazzCashService } from '../../jazzcash/jazzcash.service';
 import { User } from '../../user/entities/user.entity';
 import { WalletService } from '../../wallet/services/wallet.service';
@@ -27,6 +28,7 @@ export class WalletTopUpService {
     private readonly userRepository: Repository<User>,
     private readonly jazzCashService: JazzCashService,
     private readonly walletService: WalletService,
+    private readonly emailService: EmailService,
   ) {
     const config = getJazzCashConfig();
     this.frontendSuccessUrl = config.frontendSuccessUrl;
@@ -422,6 +424,120 @@ export class WalletTopUpService {
       throw new BadRequestException('This top-up has already been refunded');
     }
 
+    const { response } = await this.executeRefund(topUp, amount);
+
+    return { topUp: this.formatTopUp(topUp), jazzcash: response };
+  }
+
+  /** Driver-initiated refund request from the app — awaits admin review, no JazzCash call yet. */
+  async requestRefund(userId: string, topUpId: string, reason?: string) {
+    const topUp = await this.walletTopUpRepository.findOne({ where: { id: topUpId } });
+
+    if (!topUp) {
+      throw new NotFoundException('Top-up not found');
+    }
+
+    if (topUp.userId !== userId) {
+      throw new ForbiddenException('You can only request a refund for your own top-ups');
+    }
+
+    if (topUp.status !== 'completed') {
+      throw new BadRequestException('Only completed top-ups can be refunded');
+    }
+
+    if (topUp.refundStatus === 'requested' || topUp.refundStatus === 'completed') {
+      throw new BadRequestException('A refund has already been requested or completed for this top-up');
+    }
+
+    topUp.refundStatus = 'requested';
+    topUp.refundReason = reason?.trim() || null;
+    topUp.refundRequestedAt = new Date();
+    topUp.refundRejectionReason = null;
+
+    await this.walletTopUpRepository.save(topUp);
+
+    const driver = await this.userRepository.findOne({ where: { id: userId } });
+    const adminEmail = process.env.ADMIN_EMAIL;
+
+    if (adminEmail && driver) {
+      await this.emailService.sendRefundRequestedEmail(adminEmail, {
+        driverName: driver.name,
+        txnRefNo: topUp.txnRefNo,
+        amount: Number(topUp.amount),
+        reason: topUp.refundReason ?? undefined,
+      });
+    }
+
+    return { topUp: this.formatTopUp(topUp) };
+  }
+
+  /** Admin approves a pending refund request — actually calls JazzCash and notifies the driver. */
+  async acceptRefundRequest(topUpId: string, amount?: number) {
+    const topUp = await this.walletTopUpRepository.findOne({ where: { id: topUpId } });
+
+    if (!topUp) {
+      throw new NotFoundException('Top-up not found');
+    }
+
+    if (topUp.refundStatus !== 'requested') {
+      throw new BadRequestException('This top-up has no pending refund request');
+    }
+
+    const { succeeded, refundAmount, response } = await this.executeRefund(topUp, amount);
+
+    const driver = await this.userRepository.findOne({ where: { id: topUp.userId } });
+    if (driver) {
+      if (succeeded) {
+        await this.emailService.sendRefundApprovedEmail(driver.email, driver.name, {
+          txnRefNo: topUp.txnRefNo,
+          amount: refundAmount,
+        });
+      } else {
+        await this.emailService.sendRefundRejectedEmail(driver.email, driver.name, {
+          txnRefNo: topUp.txnRefNo,
+          amount: refundAmount,
+          reason: 'JazzCash declined the refund. Please try again or contact support.',
+        });
+      }
+    }
+
+    return { topUp: this.formatTopUp(topUp), jazzcash: response };
+  }
+
+  /** Admin rejects a pending refund request — no JazzCash call, just notifies the driver. */
+  async rejectRefundRequest(topUpId: string, reason?: string) {
+    const topUp = await this.walletTopUpRepository.findOne({ where: { id: topUpId } });
+
+    if (!topUp) {
+      throw new NotFoundException('Top-up not found');
+    }
+
+    if (topUp.refundStatus !== 'requested') {
+      throw new BadRequestException('This top-up has no pending refund request');
+    }
+
+    topUp.refundStatus = 'rejected';
+    topUp.refundRejectionReason = reason?.trim() || null;
+
+    await this.walletTopUpRepository.save(topUp);
+
+    const driver = await this.userRepository.findOne({ where: { id: topUp.userId } });
+    if (driver) {
+      await this.emailService.sendRefundRejectedEmail(driver.email, driver.name, {
+        txnRefNo: topUp.txnRefNo,
+        amount: Number(topUp.amount),
+        reason: topUp.refundRejectionReason ?? undefined,
+      });
+    }
+
+    return { topUp: this.formatTopUp(topUp) };
+  }
+
+  /** Shared by direct admin refund and accepted refund requests — calls JazzCash and credits/debits the wallet. */
+  private async executeRefund(
+    topUp: WalletTopUp,
+    amount?: number,
+  ): Promise<{ succeeded: boolean; refundAmount: number; response: Record<string, any> }> {
     const refundAmount = amount ?? Number(topUp.amount);
 
     if (refundAmount <= 0 || refundAmount > Number(topUp.amount)) {
@@ -470,17 +586,26 @@ export class WalletTopUpService {
       );
     }
 
-    return { topUp: this.formatTopUp(topUp), jazzcash: response };
+    return { succeeded, refundAmount, response };
   }
 
-  /** Admin listing of JazzCash top-ups across all drivers, with an optional status filter and driver search. */
-  async listForAdmin(params: { status?: string; search?: string; page?: string; limit?: string }) {
+  /** Admin listing of JazzCash top-ups across all drivers, with optional status/refund-status filters and driver search. */
+  async listForAdmin(params: {
+    status?: string;
+    refundStatus?: string;
+    search?: string;
+    page?: string;
+    limit?: string;
+  }) {
     const page = Math.max(1, Number.parseInt(params.page ?? '1', 10) || 1);
     const limit = Math.min(100, Math.max(1, Number.parseInt(params.limit ?? '20', 10) || 20));
 
     const where: Record<string, unknown> = {};
     if (params.status) {
       where.status = params.status;
+    }
+    if (params.refundStatus) {
+      where.refundStatus = params.refundStatus;
     }
 
     const search = params.search?.trim();
@@ -537,6 +662,9 @@ export class WalletTopUpService {
       jazzcashResponseCode: topUp.jazzcashResponseCode,
       jazzcashResponseMessage: topUp.jazzcashResponseMessage,
       refundStatus: topUp.refundStatus,
+      refundReason: topUp.refundReason,
+      refundRequestedAt: topUp.refundRequestedAt,
+      refundRejectionReason: topUp.refundRejectionReason,
       refundedAmount: topUp.refundedAmount ? Number(topUp.refundedAmount) : null,
       refundedAt: topUp.refundedAt,
       paidAt: topUp.paidAt,

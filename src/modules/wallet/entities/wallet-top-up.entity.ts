@@ -63,8 +63,20 @@ export class WalletTopUp {
   @Column({ name: 'expires_at', type: 'timestamp', nullable: true })
   expiresAt!: Date | null;
 
+  /** 'requested' (driver asked, awaiting admin) | 'rejected' | 'completed' | 'failed'. */
   @Column({ name: 'refund_status', type: 'varchar', length: 20, nullable: true })
   refundStatus!: string | null;
+
+  /** The driver's stated reason when requesting a refund from the app. */
+  @Column({ name: 'refund_reason', type: 'text', nullable: true })
+  refundReason!: string | null;
+
+  @Column({ name: 'refund_requested_at', type: 'timestamp', nullable: true })
+  refundRequestedAt!: Date | null;
+
+  /** The admin's stated reason when rejecting a refund request. */
+  @Column({ name: 'refund_rejection_reason', type: 'text', nullable: true })
+  refundRejectionReason!: string | null;
 
   @Column({ name: 'refunded_amount', type: 'numeric', precision: 12, scale: 2, nullable: true })
   refundedAmount!: string | null;

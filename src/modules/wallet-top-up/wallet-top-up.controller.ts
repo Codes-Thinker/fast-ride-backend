@@ -16,6 +16,8 @@ import { AdminGuard } from '../auth/guards/admin.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { InitiateTopUpDto } from './dto/initiate-top-up.dto';
 import { RefundTopUpDto } from './dto/refund-top-up.dto';
+import { RequestRefundDto } from './dto/request-refund.dto';
+import { RejectRefundDto } from './dto/reject-refund.dto';
 import { WalletTopUpService } from './services/wallet-top-up.service';
 
 @Controller('api/wallet/topup')
@@ -28,11 +30,12 @@ export class WalletTopUpController {
   @HttpCode(200)
   async listForAdmin(
     @Query('status') status?: string,
+    @Query('refundStatus') refundStatus?: string,
     @Query('search') search?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.walletTopUpService.listForAdmin({ status, search, page, limit });
+    return this.walletTopUpService.listForAdmin({ status, refundStatus, search, page, limit });
   }
 
   @Post('jazzcash/initiate')
@@ -89,5 +92,31 @@ export class WalletTopUpController {
   @HttpCode(200)
   async refund(@Param('topUpId') topUpId: string, @Body() dto: RefundTopUpDto) {
     return this.walletTopUpService.refund(topUpId, dto.amount);
+  }
+
+  /** Driver requests a refund from the app — awaits admin review. */
+  @Post(':topUpId/refund-request')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  async requestRefund(
+    @Request() req: any,
+    @Param('topUpId') topUpId: string,
+    @Body() dto: RequestRefundDto,
+  ) {
+    return this.walletTopUpService.requestRefund(req.user.id, topUpId, dto.reason);
+  }
+
+  @Post(':topUpId/refund/accept')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async acceptRefundRequest(@Param('topUpId') topUpId: string, @Body() dto: RefundTopUpDto) {
+    return this.walletTopUpService.acceptRefundRequest(topUpId, dto.amount);
+  }
+
+  @Post(':topUpId/refund/reject')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async rejectRefundRequest(@Param('topUpId') topUpId: string, @Body() dto: RejectRefundDto) {
+    return this.walletTopUpService.rejectRefundRequest(topUpId, dto.reason);
   }
 }

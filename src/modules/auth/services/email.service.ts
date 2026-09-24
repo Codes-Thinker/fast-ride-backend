@@ -158,4 +158,140 @@ export class EmailService {
       throw new Error(`Email sending failed: ${(error as Error).message}`);
     }
   }
+
+  async sendRefundRequestedEmail(
+    adminEmail: string,
+    details: { driverName: string; txnRefNo: string; amount: number; reason?: string },
+  ): Promise<void> {
+    try {
+      const htmlContent = `
+        <html>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
+              <h2 style="color: #d97706;">New Refund Request</h2>
+              <p><strong>${details.driverName}</strong> has requested a refund for a wallet top-up.</p>
+
+              <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <p><strong>Transaction Ref:</strong> ${details.txnRefNo}</p>
+                <p><strong>Amount:</strong> PKR ${details.amount.toFixed(2)}</p>
+                <p><strong>Reason:</strong> ${details.reason || 'Not provided'}</p>
+              </div>
+
+              <p>Please review this request in the admin dashboard.</p>
+
+              <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+              <p style="color: #999; font-size: 12px; text-align: center;">
+                © 2026 Indrive. All rights reserved.
+              </p>
+            </div>
+          </body>
+        </html>
+      `;
+
+      await this.transporter.sendMail({
+        from: process.env.SMTP_USER,
+        to: adminEmail,
+        subject: `Indrive - New Refund Request (${details.txnRefNo})`,
+        html: htmlContent,
+      });
+
+      this.logger.log(`Refund request notification sent to admin ${adminEmail}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to send refund request email to ${adminEmail}:`,
+        (error as Error).message,
+      );
+    }
+  }
+
+  async sendRefundApprovedEmail(
+    email: string,
+    driverName: string,
+    details: { txnRefNo: string; amount: number },
+  ): Promise<void> {
+    try {
+      const htmlContent = `
+        <html>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
+              <h2 style="color: #16a34a;">Refund Approved</h2>
+              <p>Hi <strong>${driverName}</strong>,</p>
+              <p>Your refund request has been approved and processed.</p>
+
+              <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <p><strong>Transaction Ref:</strong> ${details.txnRefNo}</p>
+                <p><strong>Refunded Amount:</strong> PKR ${details.amount.toFixed(2)}</p>
+              </div>
+
+              <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+              <p style="color: #999; font-size: 12px; text-align: center;">
+                © 2026 Indrive. All rights reserved.
+              </p>
+            </div>
+          </body>
+        </html>
+      `;
+
+      await this.transporter.sendMail({
+        from: process.env.SMTP_USER,
+        to: email,
+        subject: 'Indrive - Your Refund Has Been Approved',
+        html: htmlContent,
+      });
+
+      this.logger.log(`Refund approved email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to send refund approved email to ${email}:`,
+        (error as Error).message,
+      );
+    }
+  }
+
+  async sendRefundRejectedEmail(
+    email: string,
+    driverName: string,
+    details: { txnRefNo: string; amount: number; reason?: string },
+  ): Promise<void> {
+    try {
+      const htmlContent = `
+        <html>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
+              <h2 style="color: #dc2626;">Refund Request Rejected</h2>
+              <p>Hi <strong>${driverName}</strong>,</p>
+              <p>Unfortunately, your refund request could not be approved.</p>
+
+              <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <p><strong>Transaction Ref:</strong> ${details.txnRefNo}</p>
+                <p><strong>Amount:</strong> PKR ${details.amount.toFixed(2)}</p>
+                <p><strong>Reason:</strong> ${details.reason || 'Not specified'}</p>
+              </div>
+
+              <p>If you believe this is a mistake, please contact support.</p>
+
+              <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+              <p style="color: #999; font-size: 12px; text-align: center;">
+                © 2026 Indrive. All rights reserved.
+              </p>
+            </div>
+          </body>
+        </html>
+      `;
+
+      await this.transporter.sendMail({
+        from: process.env.SMTP_USER,
+        to: email,
+        subject: 'Indrive - Your Refund Request Was Rejected',
+        html: htmlContent,
+      });
+
+      this.logger.log(`Refund rejected email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to send refund rejected email to ${email}:`,
+        (error as Error).message,
+      );
+    }
+  }
 }
