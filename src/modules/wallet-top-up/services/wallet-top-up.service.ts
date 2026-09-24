@@ -428,10 +428,19 @@ export class WalletTopUpService {
       throw new BadRequestException('Refund amount must be between 0 and the original top-up amount');
     }
 
-    const response =
-      topUp.method === 'mwallet'
-        ? await this.jazzCashService.refundMWallet({ txnRefNo: topUp.txnRefNo, amount: refundAmount })
-        : await this.jazzCashService.refundCard({ txnRefNo: topUp.txnRefNo, amount: refundAmount });
+    let response: Record<string, any>;
+
+    try {
+      response =
+        topUp.method === 'mwallet'
+          ? await this.jazzCashService.refundMWallet({ txnRefNo: topUp.txnRefNo, amount: refundAmount })
+          : await this.jazzCashService.refundCard({ txnRefNo: topUp.txnRefNo, amount: refundAmount });
+    } catch (error) {
+      topUp.refundStatus = 'failed';
+      topUp.jazzcashRefundResponseMessage = (error as Error).message;
+      await this.walletTopUpRepository.save(topUp);
+      throw error;
+    }
 
     // MWallet refund responses are pp_-prefixed; Card refund responses are not.
     const responseCode = response['pp_ResponseCode'] ?? response['ResponseCode'];

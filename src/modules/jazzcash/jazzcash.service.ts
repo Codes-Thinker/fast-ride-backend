@@ -101,6 +101,48 @@ export class JazzCashService {
     return crypto.timingSafeEqual(receivedBuffer, expectedBuffer);
   }
 
+  /**
+   * Card Refund API responses (unlike every other JazzCash REST product)
+   * use unprefixed field names and a bare "SecureHash" key instead of
+   * pp_SecureHash. Verified against the same salt+sort+HMAC-SHA256 algorithm,
+   * but not yet confirmed against a live sandbox refund — treat a mismatch
+   * as a warning, not a hard rejection, until that's been verified.
+   */
+  private verifyUnprefixedSecureHash(fields: Record<string, any>): boolean {
+    const receivedHash = fields['SecureHash'];
+
+    if (!receivedHash) {
+      return false;
+    }
+
+    const sortedKeys = Object.keys(fields)
+      .filter(
+        (key) =>
+          key !== 'SecureHash' &&
+          fields[key] !== undefined &&
+          fields[key] !== null &&
+          String(fields[key]).trim() !== '',
+      )
+      .sort();
+
+    const hashString = [this.config.integritySalt, ...sortedKeys.map((key) => fields[key])].join(
+      '&',
+    );
+    const expectedHash = crypto
+      .createHmac('sha256', this.config.integritySalt)
+      .update(hashString)
+      .digest('hex');
+
+    const receivedBuffer = Buffer.from(String(receivedHash).toLowerCase(), 'utf8');
+    const expectedBuffer = Buffer.from(expectedHash.toLowerCase(), 'utf8');
+
+    if (receivedBuffer.length !== expectedBuffer.length) {
+      return false;
+    }
+
+    return crypto.timingSafeEqual(receivedBuffer, expectedBuffer);
+  }
+
   /** pp_ResponseCode "000" — the API call itself succeeded (MWallet debit, Status Inquiry op, refunds). */
   isApiSuccessCode(responseCode: string | undefined | null): boolean {
     return responseCode === '000';
@@ -288,7 +330,14 @@ export class JazzCashService {
       body: JSON.stringify(fields),
     });
 
-    return (await response.json()) as Record<string, any>;
+    const data = (await response.json()) as Record<string, any>;
+
+    if (!this.verifySecureHash(data)) {
+      this.logger.error(`MWallet refund response secure hash mismatch for txnRefNo=${params.txnRefNo}`);
+      throw new Error('JazzCash MWallet refund response failed secure hash verification');
+    }
+
+    return data;
   }
 
   // ---------------------------------------------------------------------
@@ -316,6 +365,12 @@ export class JazzCashService {
     // Card Refund responses use unprefixed field names (ResponseCode, not
     // pp_ResponseCode) per JazzCash's docs, so callers must read
     // `.ResponseCode` here rather than `.pp_ResponseCode`.
-    return (await response.json()) as Record<string, any>;
+    const data = (await response.json()) as Record<string, any>;
+
+    if (!this.verifyUnprefixedSecureHash(data)) {
+      this.logger.warn(`Card refund response secure hash mismatch for txnRefNo=${params.txnRefNo}`);
+    }
+
+    return data;
   }
 }
