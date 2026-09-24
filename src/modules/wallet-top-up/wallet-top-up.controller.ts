@@ -5,6 +5,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Query,
   Req,
   Res,
   Request,
@@ -20,6 +21,19 @@ import { WalletTopUpService } from './services/wallet-top-up.service';
 @Controller('api/wallet/topup')
 export class WalletTopUpController {
   constructor(private readonly walletTopUpService: WalletTopUpService) {}
+
+  /** Admin listing of JazzCash top-ups across all drivers — must be registered before the :topUpId routes. */
+  @Get('admin/list')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async listForAdmin(
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.walletTopUpService.listForAdmin({ status, search, page, limit });
+  }
 
   @Post('jazzcash/initiate')
   @UseGuards(JwtAuthGuard)

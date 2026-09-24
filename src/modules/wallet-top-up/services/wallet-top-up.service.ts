@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { ILike, In, Repository } from 'typeorm';
 import { getJazzCashConfig } from '../../../config/jazzcash.config';
 import { JazzCashService } from '../../jazzcash/jazzcash.service';
 import { User } from '../../user/entities/user.entity';
@@ -471,6 +471,57 @@ export class WalletTopUpService {
     }
 
     return { topUp: this.formatTopUp(topUp), jazzcash: response };
+  }
+
+  /** Admin listing of JazzCash top-ups across all drivers, with an optional status filter and driver search. */
+  async listForAdmin(params: { status?: string; search?: string; page?: string; limit?: string }) {
+    const page = Math.max(1, Number.parseInt(params.page ?? '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(params.limit ?? '20', 10) || 20));
+
+    const where: Record<string, unknown> = {};
+    if (params.status) {
+      where.status = params.status;
+    }
+
+    const search = params.search?.trim();
+    if (search) {
+      const matchingUsers = await this.userRepository.find({
+        where: [{ name: ILike(`%${search}%`) }, { email: ILike(`%${search}%`) }, { phone: ILike(`%${search}%`) }],
+        select: ['id'],
+      });
+
+      if (matchingUsers.length === 0) {
+        return { topUps: [], total: 0, page, limit };
+      }
+
+      where.userId = In(matchingUsers.map((u) => u.id));
+    }
+
+    const [topUps, total] = await this.walletTopUpRepository.findAndCount({
+      where,
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    const uniqueUserIds = [...new Set(topUps.map((t) => t.userId))];
+    const users = uniqueUserIds.length
+      ? await this.userRepository.find({
+          where: { id: In(uniqueUserIds) },
+          select: ['id', 'name', 'email', 'phone'],
+        })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    return {
+      topUps: topUps.map((topUp) => ({
+        ...this.formatTopUp(topUp),
+        driver: userMap.get(topUp.userId) ?? null,
+      })),
+      total,
+      page,
+      limit,
+    };
   }
 
   private formatTopUp(topUp: WalletTopUp) {
