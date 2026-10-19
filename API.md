@@ -114,7 +114,7 @@ This document lists server API endpoints, request/response fields, and role requ
 - Response: 200
   - `message`
 
----
+-----
 
 ## Users
 
