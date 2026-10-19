@@ -17,6 +17,7 @@ const CITY_TWO_STAGE_RATES: Record<RideVehicleType, { baseFare: number; afterTwo
 
 const OUT_OF_CITY_RATE = 45;
 const CITY_RATE_THRESHOLD_KM = 2;
+const COMPANY_COMMISSION_RATE = 0.15;
 
 export interface FareBreakdown {
   estimatedDistanceKm: number;
@@ -71,7 +72,7 @@ export function calculateDistanceKm(input: {
 }
 
 function buildBreakdown(estimatedDistanceKm: number, totalFare: number): FareBreakdown {
-  const companyCommission = roundMoney(totalFare * 0.15);
+  const companyCommission = roundMoney(totalFare * COMPANY_COMMISSION_RATE);
   const driverPayout = roundMoney(totalFare - companyCommission);
 
   return {

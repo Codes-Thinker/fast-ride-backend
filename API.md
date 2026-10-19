@@ -352,6 +352,16 @@ Once a driver is selected, the rider's app can track their live position over So
   - `serviceArea` (string)
   - `fares` (object) — fare breakdown per vehicle type, each entry includes `totalFare`, `companyCommission`, `driverPayout`, `estimatedDistanceKm` and breakdown details returned by the fare calculator.
 
+Fare policy:
+
+- City rides use the vehicle's minimum fare through 2 km, then add the vehicle's per-kilometre rate for each kilometre beyond 2 km:
+  - Bike: Rs 50 minimum, then Rs 16/km
+  - Rikshaw: Rs 65 minimum, then Rs 35/km
+  - Car Mini (with or without AC): Rs 95 minimum, then Rs 45/km
+  - Business Car: Rs 115 minimum, then Rs 55/km
+- Out-of-city rides are calculated at Rs 45/km.
+- Company commission is 15% of the calculated ride fare; the driver payout is the remaining 85%.
+
 ### POST /api/ride-requests
 - Role: Authenticated User (Rider)
 - Content-Type: `application/json`
