@@ -8,15 +8,28 @@ function toNumber(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+// AWS RDS rejects unencrypted connections (pg_hba "no encryption" error), so
+// SSL is on for RDS hosts even when DB_SSL was never set. DB_SSL=true/false
+// still overrides the automatic choice.
+function resolveSsl(host: string): PostgresConnectionOptions['ssl'] {
+  const explicit = process.env.DB_SSL?.trim().toLowerCase();
+  const useSsl =
+    explicit === 'true' ? true : explicit === 'false' ? false : host.endsWith('.rds.amazonaws.com');
+
+  return useSsl ? { rejectUnauthorized: false } : false;
+}
+
 export function getBaseDatabaseConfig(): PostgresConnectionOptions {
+  const host = process.env.DB_HOST || 'localhost';
+
   return {
     type: 'postgres',
-    host: process.env.DB_HOST || 'localhost',
+    host,
     port: toNumber(process.env.DB_PORT, 5432),
     username: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'password',
     database: process.env.DB_NAME || 'postgres',
-    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+    ssl: resolveSsl(host),
   };
 }
 
