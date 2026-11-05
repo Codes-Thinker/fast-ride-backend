@@ -11,12 +11,27 @@ export class EmailService {
   }
 
   private initializeTransporter() {
+    const auth = {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASSWORD,
+    };
+
+    // SMTP_HOST takes precedence so mailboxes hosted elsewhere (e.g. Hostinger) work.
+    // Without it, SMTP_SERVICE (default gmail) is used, which only accepts Gmail/Workspace accounts.
+    if (process.env.SMTP_HOST) {
+      const port = Number(process.env.SMTP_PORT) || 465;
+      this.transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port,
+        secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465,
+        auth,
+      });
+      return;
+    }
+
     this.transporter = nodemailer.createTransport({
       service: process.env.SMTP_SERVICE || 'gmail',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASSWORD,
-      },
+      auth,
     });
   }
 
