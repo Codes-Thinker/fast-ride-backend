@@ -86,6 +86,11 @@ export class User {
   @Column({ type: 'varchar', length: 13, nullable: true })
   cnic!: string | null;
 
+  // Set when the user deletes their account. The row is kept (anonymised) so
+  // ride and payment records stay intact; the account can no longer sign in.
+  @Column({ type: 'timestamp', nullable: true })
+  deleted_at!: Date | null;
+
   @CreateDateColumn({ type: 'timestamp' })
   created_at!: Date;
 

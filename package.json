@@ -4,11 +4,11 @@
   "description": "Indrive Ride-Sharing Backend API",
   "main": "dist/main.js",
   "scripts": {
-    "start": "node api.js && node dist/main.js",
+    "start": "node dist/main.js",
     "start:dev": "ts-node -r tsconfig-paths/register src/main.ts",
     "start:debug": "node --inspect-brk -r tsconfig-paths/register dist/main.js",
     "start:prod": "node dist/main.js",
-    "build": "node api.js && tsc",
+    "build": "tsc",
     "migration:run": "ts-node -r tsconfig-paths/register src/scripts/run-migrations.ts",
     "migration:revert": "ts-node -r tsconfig-paths/register src/scripts/revert-migrations.ts",
     "migration:generate": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:generate -d src/data-source.ts",

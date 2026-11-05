@@ -3,15 +3,40 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  UnauthorizedException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
+import * as bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { User } from '../entities/user.entity';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
 import { SetDriverPaymentMethodDto } from '../dto/set-driver-payment-method.dto';
 import { SetDriverCnicDto } from '../dto/set-driver-cnic.dto';
 import { CloudinaryService } from './cloudinary.service';
+import { DriverRegistration } from '../../driver-registration/entities/driver-registration.entity';
+import { RideRequest } from '../../ride-request/entities/ride-request.entity';
+import { WalletHold } from '../../wallet/entities/wallet-hold.entity';
+import { WalletTopUp } from '../../wallet/entities/wallet-top-up.entity';
+import { WalletTransaction } from '../../wallet/entities/wallet-transaction.entity';
+
+// Ride states in which the rider or driver is still tied to a trip.
+const ACTIVE_RIDE_STATUSES = ['open', 'driver_selected'];
+
+// Driver document fields on driver_registrations that hold Cloudinary public IDs.
+const DRIVER_DOCUMENT_PUBLIC_IDS = [
+  'personalPicturePublicId',
+  'frontSideOfLicensePublicId',
+  'selfieWithDriverLicensePublicId',
+  'cnicFrontPublicId',
+  'cnicBackPublicId',
+  'photoOfVehiclePublicId',
+  'vehicleRegistrationCertificatePublicId',
+  'backsideOfVehicleInformationPublicId',
+  'policeCertificatePublicId',
+] as const;
 
 @Injectable()
 export class UserService {
@@ -204,6 +229,124 @@ export class UserService {
     return {
       message: 'Profile picture deleted successfully',
       user: this.formatUserResponse(user),
+    };
+  }
+
+  /**
+   * Permanently closes the account.
+   *
+   * Personal details, the profile photo and the driver's uploaded documents are
+   * removed. The user row is anonymised and marked deleted rather than dropped,
+   * so ride and payment records keep their references for legal and dispute
+   * purposes. Deletion is refused while the account still has money or work in
+   * progress, so nothing is left stranded.
+   */
+  async deleteAccount(userId: string, password: string) {
+    const publicIdsToDelete = await this.userRepository.manager.transaction(async (manager) => {
+      // Lock the row so a ride, withdrawal or top-up can't start between the checks and the anonymisation.
+      const user = await manager.findOne(User, {
+        where: { id: userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!user || user.deleted_at) {
+        throw new NotFoundException('User not found');
+      }
+
+      if (user.is_admin) {
+        throw new ForbiddenException('Admin accounts cannot be deleted from the app');
+      }
+
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
+        throw new UnauthorizedException('Password is incorrect');
+      }
+
+      const openRides = await manager.count(RideRequest, {
+        where: [
+          { riderId: userId, status: In(ACTIVE_RIDE_STATUSES) },
+          { selectedDriverId: userId, status: In(ACTIVE_RIDE_STATUSES) },
+        ],
+      });
+      if (openRides > 0) {
+        throw new BadRequestException('Finish or cancel your active rides before deleting your account');
+      }
+
+      if (Number(user.wallet_balance) > 0) {
+        throw new BadRequestException('Withdraw your wallet balance before deleting your account');
+      }
+
+      const pendingWork = await Promise.all([
+        manager.count(WalletHold, { where: { driverId: userId, status: 'active' } }),
+        manager.count(WalletTransaction, { where: { userId, type: 'withdrawal', status: 'pending' } }),
+        manager.count(WalletTopUp, { where: { userId, refundStatus: 'requested' } }),
+      ]);
+      if (pendingWork.some((count) => count > 0)) {
+        throw new BadRequestException(
+          'Wait for pending wallet holds, withdrawals or refund requests to finish before deleting your account',
+        );
+      }
+
+      const registration = await manager.findOne(DriverRegistration, { where: { userId } });
+      const documentIds = registration
+        ? DRIVER_DOCUMENT_PUBLIC_IDS.map((field) => registration[field]).filter((id): id is string => Boolean(id))
+        : [];
+      const publicIds = [user.profile_picture_public_id, ...documentIds].filter((id): id is string => Boolean(id));
+
+      if (registration) {
+        await manager.delete(DriverRegistration, { userId });
+      }
+
+      // Random password so the old one can never sign in again; email and phone are
+      // freed up for re-registration. Unique placeholders keep the unique indexes happy.
+      const anonymised = {
+        name: 'Deleted user',
+        email: `deleted-${userId}@deleted.invalid`,
+        phone: `deleted-${userId.slice(0, 12)}`,
+        password: await bcrypt.hash(randomBytes(32).toString('hex'), 10),
+        bio: null,
+        address: null,
+        city: null,
+        state: null,
+        postal_code: null,
+        country: null,
+        gender: null,
+        profile_picture_url: null,
+        profile_picture_public_id: null,
+        otp: null,
+        otp_expires_at: null,
+        reset_password_token: null,
+        reset_password_expires_at: null,
+        refresh_token: null,
+        refresh_token_expires_at: null,
+        jazzcash_account_number: null,
+        jazzcash_account_title: null,
+        cnic: null,
+        is_driver: false,
+        is_active: false,
+        deleted_at: new Date(),
+      } as unknown as QueryDeepPartialEntity<User>;
+
+      await manager.update(User, { id: userId }, anonymised);
+
+      return publicIds;
+    });
+
+    // Images are removed after the commit. A failed Cloudinary call must not undo the
+    // deletion, so each failure is logged and the rest are still attempted.
+    for (const publicId of publicIdsToDelete) {
+      try {
+        await this.cloudinaryService.deleteImage(publicId);
+      } catch (error) {
+        this.logger.error(
+          `Could not delete image ${publicId} for deleted user ${userId}: ${(error as Error).message}`,
+        );
+      }
+    }
+
+    this.logger.log(`Account deleted for user: ${userId}`);
+    return {
+      message: 'Account deleted successfully',
     };
   }
 

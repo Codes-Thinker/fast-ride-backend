@@ -107,6 +107,7 @@ export class AdminService {
     const { page, limit, skip } = this.parsePagination(filters.page, filters.limit);
 
     const query = this.userRepository.createQueryBuilder('u');
+    query.where('u.deleted_at IS NULL');
 
     if (filters.status === 'active') {
       query.andWhere('u.is_active = :isActive', { isActive: true });

@@ -16,6 +16,7 @@ import { UserService } from './services/user.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { SetDriverPaymentMethodDto } from './dto/set-driver-payment-method.dto';
 import { SetDriverCnicDto } from './dto/set-driver-cnic.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('api/users')
@@ -75,6 +76,14 @@ export class UserController {
   @HttpCode(200)
   async deleteProfilePicture(@Request() req: any) {
     return this.userService.deleteProfilePicture(req.user.id);
+  }
+
+  // DELETE /api/users/me: the signed-in user closes their own account.
+  @Delete('me')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  async deleteAccount(@Request() req: any, @Body() dto: DeleteAccountDto) {
+    return this.userService.deleteAccount(req.user.id, dto.password);
   }
 
   @Post('deactivate')

@@ -1,43 +1,46 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Repository } from 'typeorm';
+import { User } from '../../user/entities/user.entity';
+
+// Tokens are signed with JWT_SECRET (see app.module.ts). Falling back to a
+// public default would let anyone forge a token, so refuse to start without it.
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET is not set. Add it to the environment before starting the server.');
+  }
+  return secret;
+}
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor() {
-    const secret = process.env.JWT_SECRET || 'your-secret-key';
-    console.log('🔐 JwtStrategy constructor - Using secret:', secret);
-    console.log('🔐 JwtStrategy constructor - process.env.JWT_SECRET:', process.env.JWT_SECRET);
-
-    // custom extractor to log the incoming Authorization header and token
-    const extractor = (req: any) => {
-      try {
-        const header = req && req.headers ? req.headers.authorization : undefined;
-        console.log('🔍 JwtStrategy extractor - Authorization header:', header ? header.substring(0, 200) : 'MISSING');
-        if (!header) return null;
-        const parts = header.split(' ');
-        if (parts.length === 2 && /^Bearer$/i.test(parts[0])) {
-          const token = parts[1];
-          console.log('🔍 JwtStrategy extractor - Token extracted (start):', token.substring(0, 60) + '...');
-          return token;
-        }
-        return null;
-      } catch (err) {
-        console.log('⚠️ JwtStrategy extractor error:', err);
-        return null;
-      }
-    };
-
+  constructor(
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+  ) {
     super({
-      jwtFromRequest: extractor,
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: secret,
+      secretOrKey: getJwtSecret(),
     });
   }
 
-  validate(payload: any) {
-    console.log('🔐 JwtStrategy.validate() called with payload:', JSON.stringify(payload));
-    console.log('✅ JwtStrategy validation passed');
+  async validate(payload: { id: string; email: string }) {
+    // A valid signature is not enough: an account deleted after the token was
+    // issued must stop working right away. Deactivated accounts are still
+    // allowed through so they can reactivate via POST /api/users/activate.
+    const user = await this.userRepository.findOne({
+      where: { id: payload.id },
+      select: ['id', 'deleted_at'],
+    });
+
+    if (!user || user.deleted_at) {
+      throw new UnauthorizedException('Account no longer exists');
+    }
+
     return {
       id: payload.id,
       email: payload.email,
