@@ -35,6 +35,12 @@ export class EmailService {
     });
   }
 
+  // A bare address makes inboxes show the part before "@" as the sender (e.g. "info").
+  private get fromAddress(): string {
+    const name = process.env.SMTP_FROM_NAME || 'FastRide';
+    return `"${name}" <${process.env.SMTP_USER}>`;
+  }
+
   async sendOtpEmail(email: string, otp: string, userName: string): Promise<void> {
     try {
       const htmlContent = `
@@ -63,7 +69,7 @@ export class EmailService {
       `;
 
       const mailOptions = {
-        from: process.env.SMTP_USER,
+        from: this.fromAddress,
         to: email,
         subject: 'Indrive Email Verification - OTP Code',
         html: htmlContent,
@@ -105,7 +111,7 @@ export class EmailService {
       `;
 
       const mailOptions = {
-        from: process.env.SMTP_USER,
+        from: this.fromAddress,
         to: email,
         subject: 'Indrive Password Reset - OTP Code',
         html: htmlContent,
@@ -158,7 +164,7 @@ export class EmailService {
       `;
 
       await this.transporter.sendMail({
-        from: process.env.SMTP_USER,
+        from: this.fromAddress,
         to: email,
         subject: 'Indrive - New Ride Request Alert',
         html: htmlContent,
@@ -204,7 +210,7 @@ export class EmailService {
       `;
 
       await this.transporter.sendMail({
-        from: process.env.SMTP_USER,
+        from: this.fromAddress,
         to: adminEmail,
         subject: `Indrive - New Refund Request (${details.txnRefNo})`,
         html: htmlContent,
@@ -248,7 +254,7 @@ export class EmailService {
       `;
 
       await this.transporter.sendMail({
-        from: process.env.SMTP_USER,
+        from: this.fromAddress,
         to: email,
         subject: 'Indrive - Your Refund Has Been Approved',
         html: htmlContent,
@@ -295,7 +301,7 @@ export class EmailService {
       `;
 
       await this.transporter.sendMail({
-        from: process.env.SMTP_USER,
+        from: this.fromAddress,
         to: email,
         subject: 'Indrive - Your Refund Request Was Rejected',
         html: htmlContent,
