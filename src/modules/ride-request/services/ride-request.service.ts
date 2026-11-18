@@ -121,6 +121,7 @@ export class RideRequestService {
 
     const matchedDrivers: {
       driver: User;
+      driverReg: DriverRegistration;
       distanceKm: number | null;
       driverLat: number | null;
       driverLng: number | null;
@@ -173,6 +174,7 @@ export class RideRequestService {
 
       matchedDrivers.push({
         driver,
+        driverReg,
         distanceKm,
         driverLat: liveLocation?.lat ?? null,
         driverLng: liveLocation?.lng ?? null,
@@ -225,6 +227,7 @@ export class RideRequestService {
         driverId: driver.id,
         payload: {
           rideRequestId: rideRequest.id,
+          alertId: alert.id,
           pickupLocation: dto.pickupLocation,
           dropoffLocation: dto.dropoffLocation,
           pickupLatitude,
@@ -248,6 +251,28 @@ export class RideRequestService {
     } catch (err) {
       // don't break the main flow on realtime failure
       console.warn('Realtime notify failed:', err);
+    }
+
+    // Let the rider's find-driver map show nearby bikes / rickshaws / cars.
+    try {
+      this.gateway.notifyRiderNearbyDrivers(riderId, {
+        rideRequestId: rideRequest.id,
+        count: matchedDrivers.length,
+        notifiedCount: matchedDrivers.length,
+        drivers: matchedDrivers.map(
+          ({ driver, driverReg, distanceKm, driverLat, driverLng }) => ({
+            driverId: driver.id,
+            driverPhotoUrl: driver.profile_picture_url || null,
+            vehicleType: driverReg.vehicleType || dto.vehicleType,
+            lat: driverLat,
+            lng: driverLng,
+            distanceKm,
+            viewed: false,
+          }),
+        ),
+      });
+    } catch (err) {
+      console.warn('Realtime nearby drivers notify failed:', err);
     }
 
     return {
@@ -489,18 +514,43 @@ export class RideRequestService {
     alert.isRead = true;
     alert.inAppStatus = 'opened';
     await this.driverRideAlertRepository.save(alert);
+
+    const driverReg = await this.driverRegistrationRepository.findOne({
+      where: { userId: driverId, status: 'approved' },
+    });
+    const liveLocation = this.driverLocationService.getFresh(driverId);
+    const driverPhotoUrl = driver.profile_picture_url || null;
+    const vehicleType = driverReg?.vehicleType || rideRequest.vehicleType;
+    const numberPlate = driverReg?.numberPlate || null;
+
     // Notify rider in real-time about this response
     try {
       const ride = await this.rideRequestRepository.findOne({ where: { id: rideRequestId } });
       if (ride) {
+        this.gateway.notifyRiderDriverViewed(ride.riderId, {
+          rideRequestId,
+          driverId,
+          driverPhotoUrl,
+          vehicleType,
+          lat: liveLocation?.lat ?? null,
+          lng: liveLocation?.lng ?? null,
+        });
+
         this.gateway.notifyRiderResponse(ride.riderId, {
           rideRequestId,
+          id: response.id,
           driverId,
           decision: response.decision,
           counterOfferPrice:
             response.counterOfferPrice !== null ? Number(response.counterOfferPrice) : null,
           message: response.message,
           createdAt: response.createdAt,
+          driverName: driver.name,
+          driverPhotoUrl,
+          vehicleType,
+          numberPlate,
+          lat: liveLocation?.lat ?? null,
+          lng: liveLocation?.lng ?? null,
         });
       }
     } catch (err) {
@@ -521,6 +571,10 @@ export class RideRequestService {
         message: response.message,
         createdAt: response.createdAt,
         updatedAt: response.updatedAt,
+        driverName: driver.name,
+        driverPhotoUrl,
+        vehicleType,
+        numberPlate,
       },
     };
   }
@@ -543,22 +597,44 @@ export class RideRequestService {
       order: { createdAt: 'ASC' },
     });
 
+    const driverIds = Array.from(new Set(responses.map((r) => r.driverId)));
+    const driverById = new Map<string, User>();
+    const regByUserId = new Map<string, DriverRegistration>();
+
+    if (driverIds.length > 0) {
+      const drivers = await this.userRepository.find({ where: { id: In(driverIds) } });
+      drivers.forEach((d) => driverById.set(d.id, d));
+
+      const regs = await this.driverRegistrationRepository.find({
+        where: { userId: In(driverIds), status: 'approved' },
+      });
+      regs.forEach((r) => regByUserId.set(r.userId, r));
+    }
+
     return {
       rideRequestId,
       status: rideRequest.status,
       selectedDriverId: rideRequest.selectedDriverId,
-      responses: responses.map((response) => ({
-        id: response.id,
-        driverId: response.driverId,
-        decision: response.decision,
-        counterOfferPrice:
-          response.counterOfferPrice !== null
-            ? Number(response.counterOfferPrice)
-            : null,
-        message: response.message,
-        createdAt: response.createdAt,
-        updatedAt: response.updatedAt,
-      })),
+      responses: responses.map((response) => {
+        const driver = driverById.get(response.driverId);
+        const reg = regByUserId.get(response.driverId);
+        return {
+          id: response.id,
+          driverId: response.driverId,
+          decision: response.decision,
+          counterOfferPrice:
+            response.counterOfferPrice !== null
+              ? Number(response.counterOfferPrice)
+              : null,
+          message: response.message,
+          createdAt: response.createdAt,
+          updatedAt: response.updatedAt,
+          driverName: driver?.name ?? null,
+          driverPhotoUrl: driver?.profile_picture_url ?? null,
+          vehicleType: reg?.vehicleType ?? rideRequest.vehicleType,
+          numberPlate: reg?.numberPlate ?? null,
+        };
+      }),
     };
   }
 
@@ -601,12 +677,15 @@ export class RideRequestService {
     // this ride to complete.
     await this.walletService.releaseAllHoldsForRideExcept(rideRequestId, driverId);
 
-    // Notify rider and driver in real-time
+    // Notify rider and selected driver in real-time
     try {
       this.gateway.notifyDriverSelected(rideRequest.riderId, driverId, {
         rideRequestId,
         driverId,
         selectedAt: rideRequest.selectedAt,
+        pickupLocation: rideRequest.pickupLocation,
+        dropoffLocation: rideRequest.dropoffLocation,
+        vehicleType: rideRequest.vehicleType,
         pickupLatitude: rideRequest.pickupLatitude !== null ? Number(rideRequest.pickupLatitude) : null,
         pickupLongitude: rideRequest.pickupLongitude !== null ? Number(rideRequest.pickupLongitude) : null,
         dropoffLatitude: rideRequest.dropoffLatitude !== null ? Number(rideRequest.dropoffLatitude) : null,
@@ -614,6 +693,22 @@ export class RideRequestService {
       });
     } catch (err) {
       console.warn('Realtime notify selected driver failed:', err);
+    }
+
+    // Tell other matched drivers this ride is taken so their open cards clear.
+    try {
+      const otherAlerts = await this.driverRideAlertRepository.find({
+        where: { rideRequestId },
+      });
+      const otherDriverIds = otherAlerts
+        .map((a) => a.driverId)
+        .filter((id) => id && id !== driverId);
+      this.gateway.notifyDriversRideTaken(otherDriverIds, {
+        rideRequestId,
+        driverId,
+      });
+    } catch (err) {
+      console.warn('Realtime notify other drivers failed:', err);
     }
 
     // Auto-join connected rider/driver sockets to the chat room and the live
@@ -771,7 +866,37 @@ export class RideRequestService {
     }
 
     alert.isRead = isRead;
+    if (isRead) {
+      alert.inAppStatus = 'opened';
+    }
     await this.driverRideAlertRepository.save(alert);
+
+    // When a driver opens the request, tell the rider so viewing DPs / count update.
+    if (isRead) {
+      try {
+        const ride = await this.rideRequestRepository.findOne({
+          where: { id: alert.rideRequestId },
+        });
+        const driver = await this.userRepository.findOne({ where: { id: driverId } });
+        const driverReg = await this.driverRegistrationRepository.findOne({
+          where: { userId: driverId, status: 'approved' },
+        });
+        const liveLocation = this.driverLocationService.getFresh(driverId);
+
+        if (ride) {
+          this.gateway.notifyRiderDriverViewed(ride.riderId, {
+            rideRequestId: alert.rideRequestId,
+            driverId,
+            driverPhotoUrl: driver?.profile_picture_url || null,
+            vehicleType: driverReg?.vehicleType || alert.vehicleType,
+            lat: liveLocation?.lat ?? null,
+            lng: liveLocation?.lng ?? null,
+          });
+        }
+      } catch (err) {
+        console.warn('Realtime driver-viewed notify failed:', err);
+      }
+    }
 
     return {
       message: 'Alert updated successfully',

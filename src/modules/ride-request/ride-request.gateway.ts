@@ -89,6 +89,21 @@ export class RideRequestGateway implements OnGatewayConnection, OnGatewayDisconn
     this.server.to(room).emit('ride_request:response', payload);
   }
 
+  // Nearby matched drivers (with optional live coords) for the find-driver map.
+  notifyRiderNearbyDrivers(riderId: string, payload: any) {
+    const room = `rider:${riderId}`;
+    this.logger.log(`Emitting ride_request:nearby_drivers to ${room}`);
+    this.server.to(room).emit('ride_request:nearby_drivers', payload);
+    this.server.to(room).emit('ride_request:notified', payload);
+  }
+
+  // Driver opened / viewed the ride request (inDrive-style viewing DPs).
+  notifyRiderDriverViewed(riderId: string, payload: any) {
+    const room = `rider:${riderId}`;
+    this.logger.log(`Emitting ride_request:viewed to ${room}`);
+    this.server.to(room).emit('ride_request:viewed', payload);
+  }
+
   // Notify rider and driver when a driver is selected
   notifyDriverSelected(riderId: string, driverId: string, payload: any) {
     const riderRoom = `rider:${riderId}`;
@@ -96,6 +111,15 @@ export class RideRequestGateway implements OnGatewayConnection, OnGatewayDisconn
     this.logger.log(`Emitting ride_request:driver_selected to ${riderRoom} and ${driverRoom}`);
     this.server.to(riderRoom).emit('ride_request:driver_selected', payload);
     this.server.to(driverRoom).emit('ride_request:driver_assigned', payload);
+  }
+
+  // Notify other matched drivers that this ride is no longer available.
+  notifyDriversRideTaken(driverIds: string[], payload: any) {
+    if (!driverIds.length) return;
+    this.logger.log(`Emitting ride_request:driver_selected (taken) to ${driverIds.length} other driver(s)`);
+    for (const id of driverIds) {
+      this.server.to(`driver:${id}`).emit('ride_request:driver_selected', payload);
+    }
   }
 
   // Notify rider and (if one was selected) driver that a ride was cancelled
