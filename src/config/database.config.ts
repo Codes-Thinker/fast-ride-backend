@@ -1,4 +1,5 @@
 import * as dotenv from 'dotenv';
+import { readFileSync } from 'fs';
 import { PostgresConnectionOptions } from 'typeorm/driver/postgres/PostgresConnectionOptions';
 
 dotenv.config();
@@ -16,7 +17,18 @@ function resolveSsl(host: string): PostgresConnectionOptions['ssl'] {
   const useSsl =
     explicit === 'true' ? true : explicit === 'false' ? false : host.endsWith('.rds.amazonaws.com');
 
-  return useSsl ? { rejectUnauthorized: false } : false;
+  if (!useSsl) {
+    return false;
+  }
+
+  const caPath = process.env.DB_SSL_CA_PATH?.trim();
+  const caPem = process.env.DB_SSL_CA_PEM?.trim();
+  const ca = caPem ? caPem : caPath ? readFileSync(caPath, 'utf8') : undefined;
+
+  return {
+    rejectUnauthorized: true,
+    ...(ca ? { ca } : {}),
+  };
 }
 
 export function getBaseDatabaseConfig(): PostgresConnectionOptions {

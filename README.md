@@ -133,17 +133,17 @@ DB_PASSWORD=shakeel
 DB_NAME=fastride
 
 # JWT Configuration
-JWT_SECRET=indrive-secret-key-2026-development
+JWT_SECRET=replace-with-a-random-secret
 
 # Email Configuration (Nodemailer)
 SMTP_SERVICE=gmail
 SMTP_USER=shakeeldev.tech@gmail.com
-SMTP_PASSWORD=slcv fcpw ljad cpjy
+SMTP_PASSWORD=replace-with-the-smtp-app-password
 
 # Cloudinary Configuration
 CLOUDINARY_CLOUD_NAME=dpgdbecnu
-CLOUDINARY_API_KEY=129221467134845
-CLOUDINARY_API_SECRET=YDlvL6O-dSRo3XQiWNF0er0xdYU
+CLOUDINARY_API_KEY=replace-with-the-cloudinary-api-key
+CLOUDINARY_API_SECRET=replace-with-the-cloudinary-api-secret
 
 # Frontend URL
 FRONTEND_URL=http://localhost:3000
