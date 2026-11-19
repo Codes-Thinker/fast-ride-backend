@@ -72,6 +72,24 @@ export class AdminController {
     return this.adminService.listRides({ status, search, page, limit });
   }
 
+  @Get('rides/:id')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async getRideDetail(@Param('id', new ParseUUIDPipe()) rideId: string) {
+    return this.adminService.getRideDetail(rideId);
+  }
+
+  @Get('rides/:id/messages')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async getRideMessages(
+    @Request() req: any,
+    @Param('id', new ParseUUIDPipe()) rideId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.getRideMessages(req.user.id, rideId, limit);
+  }
+
   @Get('driver-registrations')
   @UseGuards(JwtAuthGuard, AdminGuard)
   @HttpCode(200)

@@ -29,5 +29,7 @@ import { DriverLocationService } from './services/driver-location.service';
   ],
   controllers: [RideRequestController],
   providers: [RideRequestService, RideRequestGateway, ChatService, DriverLocationService],
+  // Exported so the admin module reads the same in-memory driver location store the gateway writes to.
+  exports: [ChatService, DriverLocationService],
 })
 export class RideRequestModule {}

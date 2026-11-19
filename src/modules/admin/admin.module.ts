@@ -11,6 +11,10 @@ import { AdminService } from './admin.service';
 import { AdminAuditLog } from './entities/admin-audit-log.entity';
 import { AuditService } from './services/audit.service';
 import { AppVersionModule } from '../app-version/app-version.module';
+import { RideRequestModule } from '../ride-request/ride-request.module';
+import { DriverRideAlert } from '../ride-request/entities/driver-ride-alert.entity';
+import { DriverRideResponse } from '../ride-request/entities/driver-ride-response.entity';
+import { ChatMessage } from '../ride-request/entities/chat-message.entity';
 
 @Module({
   imports: [
@@ -21,9 +25,14 @@ import { AppVersionModule } from '../app-version/app-version.module';
       WalletTransaction,
       WalletTopUp,
       AdminAuditLog,
+      DriverRideAlert,
+      DriverRideResponse,
+      ChatMessage,
     ]),
     WalletModule,
     AppVersionModule,
+    // Provides ChatService and the shared DriverLocationService singleton.
+    RideRequestModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, AuditService],

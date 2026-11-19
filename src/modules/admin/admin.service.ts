@@ -9,6 +9,11 @@ import { WalletTransaction } from '../wallet/entities/wallet-transaction.entity'
 import { WalletService } from '../wallet/services/wallet.service';
 import { ChangeUserRoleDto } from './dto/change-user-role.dto';
 import { AuditService } from './services/audit.service';
+import { ChatService } from '../ride-request/services/chat.service';
+import { DriverLocationService } from '../ride-request/services/driver-location.service';
+import { DriverRideAlert } from '../ride-request/entities/driver-ride-alert.entity';
+import { DriverRideResponse } from '../ride-request/entities/driver-ride-response.entity';
+import { ChatMessage } from '../ride-request/entities/chat-message.entity';
 import { AppVersionService } from '../app-version/app-version.service';
 import type { AppVersionSnapshot } from '../app-version/app-version.service';
 import { AppVersionConfig } from '../app-version/entities/app-version-config.entity';
@@ -47,6 +52,14 @@ export class AdminService {
     private readonly walletService: WalletService,
     private readonly auditService: AuditService,
     private readonly appVersionService: AppVersionService,
+    @InjectRepository(DriverRideAlert)
+    private readonly driverRideAlertRepository: Repository<DriverRideAlert>,
+    @InjectRepository(DriverRideResponse)
+    private readonly driverRideResponseRepository: Repository<DriverRideResponse>,
+    @InjectRepository(ChatMessage)
+    private readonly chatMessageRepository: Repository<ChatMessage>,
+    private readonly chatService: ChatService,
+    private readonly driverLocationService: DriverLocationService,
   ) {}
 
   async getAppVersion(platform?: AppPlatform) {
@@ -503,6 +516,336 @@ export class AdminService {
     };
   }
 
+  // ---------------------------------------------------------------
+  // Ride tracking
+  // ---------------------------------------------------------------
+
+  /** Loads name/contact fields for a set of users in one query. Never returns credentials. */
+  private async loadUserSummaries(ids: (string | null | undefined)[]) {
+    const unique = Array.from(new Set(ids.filter((id): id is string => Boolean(id))));
+    const map = new Map<string, { id: string; name: string; email: string; phone: string }>();
+    if (unique.length === 0) return map;
+
+    const users = await this.userRepository.find({
+      where: { id: In(unique) },
+      select: { id: true, name: true, email: true, phone: true },
+    });
+    for (const user of users) {
+      map.set(user.id, user);
+    }
+    return map;
+  }
+
+  private formatPkr(value: string | number | null | undefined): string {
+    return `PKR ${Math.round(this.toNumber(value)).toLocaleString('en-US')}`;
+  }
+
+  private responseTitle(decision: string, counterOfferPrice: string | null): string {
+    if (decision === 'declined') return 'Driver declined';
+    if (decision === 'interested') return counterOfferPrice !== null ? 'Counter-offer' : 'Driver interested';
+    return decision
+      .replace(/[_-]+/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  private capitalise(value: string): string {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+
+  async getRideDetail(rideId: string) {
+    const ride = await this.rideRequestRepository.findOne({ where: { id: rideId } });
+    if (!ride) {
+      throw new NotFoundException('Ride not found');
+    }
+
+    const [
+      alertTotal,
+      alertUnread,
+      alertEmailFailed,
+      alertRows,
+      alertByVehicle,
+      responseRows,
+      paymentRows,
+      chatMessageCount,
+      lastChatMessage,
+      registration,
+    ] = await Promise.all([
+      this.driverRideAlertRepository.count({ where: { rideRequestId: rideId } }),
+      this.driverRideAlertRepository.count({ where: { rideRequestId: rideId, isRead: false } }),
+      this.driverRideAlertRepository.count({ where: { rideRequestId: rideId, emailStatus: 'failed' } }),
+      this.driverRideAlertRepository.find({
+        where: { rideRequestId: rideId },
+        order: { createdAt: 'ASC' },
+        take: 100,
+      }),
+      this.driverRideAlertRepository
+        .createQueryBuilder('a')
+        .select('a.vehicleType', 'vehicleType')
+        .addSelect('COUNT(*)', 'count')
+        .where('a.rideRequestId = :rideId', { rideId })
+        .groupBy('a.vehicleType')
+        .getRawMany<{ vehicleType: string; count: string }>(),
+      this.driverRideResponseRepository.find({
+        where: { rideRequestId: rideId },
+        order: { createdAt: 'ASC' },
+      }),
+      this.walletTransactionRepository.find({
+        where: { rideRequestId: rideId },
+        order: { createdAt: 'ASC' },
+      }),
+      this.chatMessageRepository.count({ where: { rideRequestId: rideId } }),
+      this.chatMessageRepository.findOne({
+        where: { rideRequestId: rideId },
+        order: { sentAt: 'DESC' },
+      }),
+      ride.selectedDriverId
+        ? this.driverRegistrationRepository.findOne({
+            where: { userId: ride.selectedDriverId },
+            select: {
+              id: true,
+              userId: true,
+              vehicleType: true,
+              vehicleBrand: true,
+              vehicleModel: true,
+              numberPlate: true,
+              vehicleColor: true,
+              productionYear: true,
+            },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    const userMap = await this.loadUserSummaries([
+      ride.riderId,
+      ride.selectedDriverId,
+      ...alertRows.map((alert) => alert.driverId),
+      ...responseRows.map((response) => response.driverId),
+      ...paymentRows.map((payment) => payment.userId),
+    ]);
+
+    const rider = userMap.get(ride.riderId) ?? null;
+    const driverUser = ride.selectedDriverId ? (userMap.get(ride.selectedDriverId) ?? null) : null;
+
+    // Timeline: built from the ride's own timestamps plus the alert and response rows.
+    type TimelineKind = 'requested' | 'alerts_sent' | 'driver_response' | 'driver_selected' | 'completed' | 'cancelled';
+    const timeline: {
+      id: string;
+      at: Date;
+      kind: TimelineKind;
+      title: string;
+      detail: string | null;
+      driverId: string | null;
+      driverName: string | null;
+    }[] = [];
+
+    timeline.push({
+      id: `requested-${ride.id}`,
+      at: ride.createdAt,
+      kind: 'requested',
+      title: 'Ride requested',
+      detail: `Offer ${this.formatPkr(ride.offeredPrice)}`,
+      driverId: null,
+      driverName: null,
+    });
+
+    if (alertTotal > 0 && alertRows.length > 0) {
+      const breakdown = alertByVehicle
+        .map((row) => `${this.capitalise(row.vehicleType)} ${Number(row.count)}`)
+        .join(' · ');
+      timeline.push({
+        id: `alerts-${ride.id}`,
+        at: alertRows[0].createdAt,
+        kind: 'alerts_sent',
+        title: `Sent to ${alertTotal} nearby driver${alertTotal === 1 ? '' : 's'}`,
+        detail: breakdown || null,
+        driverId: null,
+        driverName: null,
+      });
+    }
+
+    for (const response of responseRows) {
+      timeline.push({
+        id: `response-${response.id}`,
+        at: response.createdAt,
+        kind: 'driver_response',
+        title: this.responseTitle(response.decision, response.counterOfferPrice),
+        detail:
+          response.counterOfferPrice !== null
+            ? this.formatPkr(response.counterOfferPrice)
+            : response.message?.trim() || null,
+        driverId: response.driverId,
+        driverName: userMap.get(response.driverId)?.name ?? null,
+      });
+    }
+
+    if (ride.selectedAt) {
+      timeline.push({
+        id: `selected-${ride.id}`,
+        at: ride.selectedAt,
+        kind: 'driver_selected',
+        title: 'Driver selected',
+        detail: null,
+        driverId: ride.selectedDriverId,
+        driverName: driverUser?.name ?? null,
+      });
+    }
+
+    if (ride.completedAt) {
+      timeline.push({
+        id: `completed-${ride.id}`,
+        at: ride.completedAt,
+        kind: 'completed',
+        title: 'Ride completed',
+        detail: `Driver payout ${this.formatPkr(ride.driverPayout)}`,
+        driverId: ride.selectedDriverId,
+        driverName: driverUser?.name ?? null,
+      });
+    }
+
+    if (ride.cancelledAt) {
+      timeline.push({
+        id: `cancelled-${ride.id}`,
+        at: ride.cancelledAt,
+        kind: 'cancelled',
+        title: 'Ride cancelled',
+        detail: null,
+        driverId: ride.selectedDriverId,
+        driverName: driverUser?.name ?? null,
+      });
+    }
+
+    timeline.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+
+    // Live location exists only while a driver is assigned; it comes from the in-memory store.
+    const tracking =
+      ride.status === 'driver_selected' && ride.selectedDriverId
+        ? (() => {
+            const location = this.driverLocationService.getFresh(ride.selectedDriverId);
+            return {
+              driverLocation: location
+                ? { lat: location.lat, lng: location.lng, updatedAt: location.updatedAt }
+                : null,
+              serverTime: Date.now(),
+            };
+          })()
+        : null;
+
+    return {
+      ride,
+      rider: rider ? { id: rider.id, name: rider.name, email: rider.email, phone: rider.phone } : null,
+      driver: driverUser
+        ? {
+            id: driverUser.id,
+            name: driverUser.name,
+            email: driverUser.email,
+            phone: driverUser.phone,
+            vehicle: registration
+              ? {
+                  type: registration.vehicleType,
+                  brand: registration.vehicleBrand,
+                  model: registration.vehicleModel,
+                  plate: registration.numberPlate,
+                  color: registration.vehicleColor,
+                  productionYear: registration.productionYear,
+                }
+              : null,
+          }
+        : null,
+      timeline: timeline.map((event) => ({
+        id: event.id,
+        at: new Date(event.at).toISOString(),
+        kind: event.kind,
+        title: event.title,
+        detail: event.detail,
+        driverId: event.driverId,
+        driverName: event.driverName,
+      })),
+      alerts: {
+        total: alertTotal,
+        unread: alertUnread,
+        emailFailed: alertEmailFailed,
+        drivers: alertRows.map((alert) => ({
+          id: alert.id,
+          driverId: alert.driverId,
+          driverName: userMap.get(alert.driverId)?.name ?? null,
+          vehicleType: alert.vehicleType,
+          inAppStatus: alert.inAppStatus,
+          emailStatus: alert.emailStatus,
+          isRead: alert.isRead,
+          sentAt: new Date(alert.createdAt).toISOString(),
+        })),
+      },
+      responses: responseRows.map((response) => {
+        const driver = userMap.get(response.driverId);
+        return {
+          id: response.id,
+          at: new Date(response.createdAt).toISOString(),
+          decision: response.decision,
+          counterOfferPrice:
+            response.counterOfferPrice !== null ? this.toNumber(response.counterOfferPrice) : null,
+          message: response.message?.trim() || null,
+          driver: driver ? { id: driver.id, name: driver.name, phone: driver.phone } : null,
+        };
+      }),
+      payments: paymentRows.map((payment) => ({
+        id: payment.id,
+        type: payment.type,
+        amount: this.toNumber(payment.amount),
+        status: payment.status,
+        description: payment.description,
+        userId: payment.userId,
+        userName: userMap.get(payment.userId)?.name ?? null,
+        createdAt: new Date(payment.createdAt).toISOString(),
+      })),
+      chat: {
+        messageCount: chatMessageCount,
+        lastMessageAt: lastChatMessage ? new Date(lastChatMessage.sentAt).toISOString() : null,
+      },
+      tracking,
+    };
+  }
+
+  /**
+   * Returns the most recent chat messages for a ride, oldest first.
+   * Reading a transcript is sensitive, so every successful read is audited.
+   */
+  async getRideMessages(adminId: string, rideId: string, limit?: string) {
+    const ride = await this.rideRequestRepository.findOne({ where: { id: rideId } });
+    if (!ride) {
+      throw new NotFoundException('Ride not found');
+    }
+
+    const parsedLimit = Number.parseInt(limit ?? '100', 10);
+    const safeLimit = Number.isNaN(parsedLimit) ? 100 : Math.min(500, Math.max(1, parsedLimit));
+
+    const rows = await this.chatService.getMessages(rideId, safeLimit);
+    const userMap = await this.loadUserSummaries(rows.map((message) => message.fromUserId));
+
+    const messages = rows.map((message) => ({
+      id: message.id,
+      sentAt: new Date(message.sentAt).toISOString(),
+      text: message.text,
+      senderRole:
+        message.fromUserId === ride.riderId
+          ? ('rider' as const)
+          : message.fromUserId === ride.selectedDriverId
+            ? ('driver' as const)
+            : ('unknown' as const),
+      senderName: userMap.get(message.fromUserId)?.name ?? null,
+    }));
+
+    await this.auditService.log({
+      adminId,
+      action: 'ride.chat_viewed',
+      targetType: 'ride',
+      targetId: rideId,
+      summary: `Viewed chat transcript (${messages.length} messages)`,
+      metadata: { messageCount: messages.length },
+    });
+
+    return { messages };
+  }
+
   async listRides(filters: {
     status?: string;
     search?: string;
@@ -515,7 +858,10 @@ export class AdminService {
 
     // 'selected' is accepted as a legacy alias; the real status is 'driver_selected'.
     const status = filters.status === 'selected' ? 'driver_selected' : filters.status;
-    if (status && status !== 'all') {
+    if (status === 'active') {
+      // Rides still in progress: waiting for a driver, or a driver is on the way.
+      query.andWhere('r.status IN (:...activeStatuses)', { activeStatuses: ['open', 'driver_selected'] });
+    } else if (status && status !== 'all') {
       query.andWhere('r.status = :status', { status });
     }
 
