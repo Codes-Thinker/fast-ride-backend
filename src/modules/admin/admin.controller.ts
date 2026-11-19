@@ -1,4 +1,17 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query, Request, UseGuards, Patch, Delete } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  Request,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { AdminService } from './admin.service';
@@ -16,6 +29,13 @@ export class AdminController {
     return this.adminService.getDashboardStats();
   }
 
+  @Get('dashboard/analytics')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async getAnalytics(@Query('days') days?: string) {
+    return this.adminService.getAnalytics(days);
+  }
+
   @Get('users')
   @UseGuards(JwtAuthGuard, AdminGuard)
   @HttpCode(200)
@@ -25,8 +45,17 @@ export class AdminController {
     @Query('search') search?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('sort') sort?: string,
+    @Query('order') order?: string,
   ) {
-    return this.adminService.listUsers({ role, status, search, page, limit });
+    return this.adminService.listUsers({ role, status, search, page, limit, sort, order });
+  }
+
+  @Get('users/:id')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async getUserDetail(@Param('id', new ParseUUIDPipe()) userId: string) {
+    return this.adminService.getUserDetail(userId);
   }
 
   @Get('rides')
@@ -58,15 +87,15 @@ export class AdminController {
   @Post('driver-registrations/:id/approve')
   @UseGuards(JwtAuthGuard, AdminGuard)
   @HttpCode(200)
-  async approve(@Param('id') id: string) {
-    return this.adminService.approveDriverRegistration(id);
+  async approve(@Request() req: any, @Param('id') id: string) {
+    return this.adminService.approveDriverRegistration(id, req.user.id);
   }
 
   @Post('driver-registrations/:id/reject')
   @UseGuards(JwtAuthGuard, AdminGuard)
   @HttpCode(200)
-  async reject(@Param('id') id: string, @Body() body: { reason?: string }) {
-    return this.adminService.rejectDriverRegistration(id, body.reason);
+  async reject(@Request() req: any, @Param('id') id: string, @Body() body: { reason?: string }) {
+    return this.adminService.rejectDriverRegistration(id, req.user.id, body?.reason);
   }
 
   @Patch('users/:id/role')
@@ -97,24 +126,46 @@ export class AdminController {
   @Post('wallet/withdrawals/:id/complete')
   @UseGuards(JwtAuthGuard, AdminGuard)
   @HttpCode(200)
-  async completeWithdrawal(@Param('id') id: string) {
-    return this.adminService.completeWithdrawal(id);
+  async completeWithdrawal(@Request() req: any, @Param('id') id: string) {
+    return this.adminService.completeWithdrawal(id, req.user.id);
   }
 
   @Post('wallet/withdrawals/:id/reject')
   @UseGuards(JwtAuthGuard, AdminGuard)
   @HttpCode(200)
-  async rejectWithdrawal(@Param('id') id: string, @Body() body: { reason?: string }) {
-    return this.adminService.rejectWithdrawal(id, body?.reason);
+  async rejectWithdrawal(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.adminService.rejectWithdrawal(id, req.user.id, body?.reason);
   }
 
   @Post('wallet/drivers/:id/credit')
   @UseGuards(JwtAuthGuard, AdminGuard)
   @HttpCode(200)
   async creditDriverWallet(
+    @Request() req: any,
     @Param('id') id: string,
     @Body() creditDto: CreditDriverWalletDto,
   ) {
-    return this.adminService.creditDriverWallet(id, creditDto.amount, creditDto.description);
+    return this.adminService.creditDriverWallet(
+      req.user.id,
+      id,
+      creditDto.amount,
+      creditDto.description,
+    );
+  }
+
+  @Get('audit-logs')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async listAuditLogs(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('action') action?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.adminService.listAuditLogs({ page, limit, action, search });
   }
 }

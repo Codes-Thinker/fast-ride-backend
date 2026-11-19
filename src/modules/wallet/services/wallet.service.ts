@@ -448,7 +448,7 @@ export class WalletService {
     return { message: 'Withdrawal rejected and refunded to wallet', transaction: this.formatTransaction(withdrawal) };
   }
 
-  private formatTransaction(transaction: WalletTransaction) {
+  formatTransaction(transaction: WalletTransaction) {
     return {
       id: transaction.id,
       userId: transaction.userId,
