@@ -10,6 +10,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './modules/auth/auth.module';
 import { DriverRegistrationModule } from './modules/driver-registration/driver-registration.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { AppVersionModule } from './modules/app-version/app-version.module';
 import { RideRequestModule } from './modules/ride-request/ride-request.module';
 import { UserModule } from './modules/user/user.module';
 import { WalletModule } from './modules/wallet/wallet.module';
@@ -39,6 +40,7 @@ dotenv.config();
     UserModule,
     DriverRegistrationModule,
     AdminModule,
+    AppVersionModule,
     RideRequestModule,
     WalletModule,
     WalletTopUpModule,

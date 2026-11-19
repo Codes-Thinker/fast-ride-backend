@@ -9,6 +9,12 @@ import { WalletTransaction } from '../wallet/entities/wallet-transaction.entity'
 import { WalletService } from '../wallet/services/wallet.service';
 import { ChangeUserRoleDto } from './dto/change-user-role.dto';
 import { AuditService } from './services/audit.service';
+import { AppVersionService } from '../app-version/app-version.service';
+import type { AppVersionSnapshot } from '../app-version/app-version.service';
+import { AppVersionConfig } from '../app-version/entities/app-version-config.entity';
+import { UpdateAppVersionDto } from '../app-version/dto/app-version.dto';
+import { DEFAULT_PLATFORM } from '../app-version/app-version.constants';
+import type { AppPlatform } from '../app-version/app-version.constants';
 
 // Date range start shared by the analytics queries (parameter $1 = number of days).
 // Uses session-local wall-clock time (now()::timestamp) to match `timestamp` columns.
@@ -40,7 +46,47 @@ export class AdminService {
     private readonly walletTopUpRepository: Repository<WalletTopUp>,
     private readonly walletService: WalletService,
     private readonly auditService: AuditService,
+    private readonly appVersionService: AppVersionService,
   ) {}
+
+  async getAppVersion(platform?: AppPlatform) {
+    const config = await this.appVersionService.getForPlatform(platform ?? DEFAULT_PLATFORM);
+    return { config: this.toAdminAppVersion(config) };
+  }
+
+  async updateAppVersion(adminId: string, platform: AppPlatform | undefined, dto: UpdateAppVersionDto) {
+    const target = platform ?? DEFAULT_PLATFORM;
+    const { before, after } = await this.appVersionService.update(target, dto, adminId);
+    const afterSnapshot = this.appVersionService.snapshot(after);
+
+    const changedFields = (Object.keys(afterSnapshot) as (keyof AppVersionSnapshot)[]).filter(
+      (key) => before[key] !== afterSnapshot[key],
+    );
+
+    await this.auditService.log({
+      adminId,
+      action: 'app_version.updated',
+      targetType: 'app_version',
+      targetId: target,
+      summary: `Updated ${target} app version: latest ${after.latestVersion}, minimum ${after.minimumSupportedVersion}, ${after.updateType}${after.updateEnabled ? '' : ', updates disabled'}`,
+      metadata: { changedFields, before, after: afterSnapshot },
+    });
+
+    return {
+      message: 'App version settings saved',
+      config: this.toAdminAppVersion(after),
+    };
+  }
+
+  private toAdminAppVersion(config: AppVersionConfig) {
+    return {
+      id: config.id,
+      platform: config.platform,
+      ...this.appVersionService.snapshot(config),
+      updatedById: config.updatedById,
+      updatedAt: config.updatedAt,
+    };
+  }
 
   private parsePagination(page?: string, limit?: string) {
     const parsedPage = Number.parseInt(page ?? '1', 10);

@@ -10,6 +10,7 @@ import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AdminAuditLog } from './entities/admin-audit-log.entity';
 import { AuditService } from './services/audit.service';
+import { AppVersionModule } from '../app-version/app-version.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AuditService } from './services/audit.service';
       AdminAuditLog,
     ]),
     WalletModule,
+    AppVersionModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, AuditService],

@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Request,
   UseGuards,
@@ -17,6 +18,7 @@ import { AdminGuard } from '../auth/guards/admin.guard';
 import { AdminService } from './admin.service';
 import { ChangeUserRoleDto } from './dto/change-user-role.dto';
 import { CreditDriverWalletDto } from './dto/credit-driver-wallet.dto';
+import { AppVersionQueryDto, UpdateAppVersionDto } from '../app-version/dto/app-version.dto';
 
 @Controller('api/admin')
 export class AdminController {
@@ -167,5 +169,23 @@ export class AdminController {
     @Query('search') search?: string,
   ) {
     return this.adminService.listAuditLogs({ page, limit, action, search });
+  }
+
+  @Get('app-version')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async getAppVersion(@Query() query: AppVersionQueryDto) {
+    return this.adminService.getAppVersion(query.platform);
+  }
+
+  @Put('app-version')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async updateAppVersion(
+    @Request() req: any,
+    @Query() query: AppVersionQueryDto,
+    @Body() dto: UpdateAppVersionDto,
+  ) {
+    return this.adminService.updateAppVersion(req.user.id, query.platform, dto);
   }
 }
