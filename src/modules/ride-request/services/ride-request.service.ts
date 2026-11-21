@@ -370,7 +370,7 @@ export class RideRequestService {
     // this ride from me right now" figure that stays consistent with what
     // ride_request:created reports in real time.
     const driverLocation = this.driverLocationService.getFresh(driverId);
-    const now = DateTime.now().getTime();
+    const now = Date.now();
     const REQUEST_TTL_MS = 60_000;
 
     const enrichedAlerts = alerts
