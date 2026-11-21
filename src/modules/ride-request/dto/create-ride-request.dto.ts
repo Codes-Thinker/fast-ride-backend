@@ -52,6 +52,13 @@ export class CreateRideRequestDto {
   @Min(1, { message: 'Offered price must be greater than 0' })
   offeredPrice?: number;
 
+  /// Optional road-route distance from Google Routes (km). Prefer over haversine.
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'Estimated distance must be a number' })
+  @Min(0.01, { message: 'Estimated distance must be greater than 0' })
+  estimatedDistanceKm?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsNumber({}, { message: 'Pickup latitude must be a number' })

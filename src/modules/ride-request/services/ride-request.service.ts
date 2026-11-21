@@ -360,16 +360,38 @@ export class RideRequestService {
 
     const rideById = new Map(rideRequests.map((ride) => [ride.id, ride]));
 
+    // Exclude rides this driver already declined — prevents stale cards after refresh.
+    const declinedResponses = await this.driverRideResponseRepository.find({
+      where: { driverId, decision: 'declined', rideRequestId: In(rideRequestIds) },
+    });
+    const declinedIds = new Set(declinedResponses.map((r) => r.rideRequestId));
+
     // Driver's current position, if any — used to show a live "how far is
     // this ride from me right now" figure that stays consistent with what
     // ride_request:created reports in real time.
     const driverLocation = this.driverLocationService.getFresh(driverId);
+    const now = DateTime.now().getTime();
+    const REQUEST_TTL_MS = 60_000;
 
-    const enrichedAlerts = alerts.map((alert) => {
-      const ride = rideById.get(alert.rideRequestId);
+    const enrichedAlerts = alerts
+      .filter((alert) => {
+        if (declinedIds.has(alert.rideRequestId)) return false;
+        const ride = rideById.get(alert.rideRequestId);
+        if (!ride) return false;
+        // Only active open offers.
+        if (ride.status !== 'open') return false;
+        // Backend source-of-truth 60s expiry from createdAt.
+        const createdMs = new Date(ride.createdAt).getTime();
+        if (Number.isFinite(createdMs) && now - createdMs > REQUEST_TTL_MS) {
+          return false;
+        }
+        return true;
+      })
+      .map((alert) => {
+      const ride = rideById.get(alert.rideRequestId)!;
 
       const distanceToPickupKm =
-        ride && driverLocation && ride.pickupLatitude !== null && ride.pickupLongitude !== null
+        driverLocation && ride.pickupLatitude !== null && ride.pickupLongitude !== null
           ? calculateDistanceKm({
               pickupLatitude: Number(ride.pickupLatitude),
               pickupLongitude: Number(ride.pickupLongitude),
@@ -378,10 +400,13 @@ export class RideRequestService {
             })
           : null;
 
+      const createdMs = new Date(ride.createdAt).getTime();
+      const expiresAt = new Date(createdMs + REQUEST_TTL_MS).toISOString();
+
       return {
         ...alert,
-        ride: ride
-          ? {
+        expiresAt,
+        ride: {
               pickupLocation: ride.pickupLocation,
               dropoffLocation: ride.dropoffLocation,
               pickupArea: ride.pickupArea,
@@ -398,9 +423,9 @@ export class RideRequestService {
               paymentMethod: ride.paymentMethod,
               status: ride.status,
               createdAt: ride.createdAt,
+              expiresAt,
               distanceToPickupKm,
-            }
-          : null,
+            },
       };
     });
 
@@ -523,38 +548,40 @@ export class RideRequestService {
     const vehicleType = driverReg?.vehicleType || rideRequest.vehicleType;
     const numberPlate = driverReg?.numberPlate || null;
 
-    // Notify rider in real-time about this response
-    try {
-      const ride = await this.rideRequestRepository.findOne({ where: { id: rideRequestId } });
-      if (ride) {
-        this.gateway.notifyRiderDriverViewed(ride.riderId, {
-          rideRequestId,
-          driverId,
-          driverPhotoUrl,
-          vehicleType,
-          lat: liveLocation?.lat ?? null,
-          lng: liveLocation?.lng ?? null,
-        });
+    // Notify rider only for interested offers — never broadcast declines.
+    if (dto.decision === 'interested') {
+      try {
+        const ride = await this.rideRequestRepository.findOne({ where: { id: rideRequestId } });
+        if (ride) {
+          this.gateway.notifyRiderDriverViewed(ride.riderId, {
+            rideRequestId,
+            driverId,
+            driverPhotoUrl,
+            vehicleType,
+            lat: liveLocation?.lat ?? null,
+            lng: liveLocation?.lng ?? null,
+          });
 
-        this.gateway.notifyRiderResponse(ride.riderId, {
-          rideRequestId,
-          id: response.id,
-          driverId,
-          decision: response.decision,
-          counterOfferPrice:
-            response.counterOfferPrice !== null ? Number(response.counterOfferPrice) : null,
-          message: response.message,
-          createdAt: response.createdAt,
-          driverName: driver.name,
-          driverPhotoUrl,
-          vehicleType,
-          numberPlate,
-          lat: liveLocation?.lat ?? null,
-          lng: liveLocation?.lng ?? null,
-        });
+          this.gateway.notifyRiderResponse(ride.riderId, {
+            rideRequestId,
+            id: response.id,
+            driverId,
+            decision: response.decision,
+            counterOfferPrice:
+              response.counterOfferPrice !== null ? Number(response.counterOfferPrice) : null,
+            message: response.message,
+            createdAt: response.createdAt,
+            driverName: driver.name,
+            driverPhotoUrl,
+            vehicleType,
+            numberPlate,
+            lat: liveLocation?.lat ?? null,
+            lng: liveLocation?.lng ?? null,
+          });
+        }
+      } catch (err) {
+        console.warn('Realtime rider notify failed:', err);
       }
-    } catch (err) {
-      console.warn('Realtime rider notify failed:', err);
     }
 
     return {
@@ -1020,6 +1047,15 @@ export class RideRequestService {
   }
 
   private resolveEstimatedDistanceKm(dto: CreateRideRequestDto): number {
+    // Prefer client road-route distance so user/driver/backend stay in sync.
+    if (
+      dto.estimatedDistanceKm !== undefined &&
+      Number.isFinite(dto.estimatedDistanceKm) &&
+      dto.estimatedDistanceKm > 0
+    ) {
+      return Number(dto.estimatedDistanceKm);
+    }
+
     if (
       dto.pickupLatitude === undefined ||
       dto.pickupLongitude === undefined ||
