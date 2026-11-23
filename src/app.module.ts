@@ -15,6 +15,7 @@ import { RideRequestModule } from './modules/ride-request/ride-request.module';
 import { UserModule } from './modules/user/user.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { WalletTopUpModule } from './modules/wallet-top-up/wallet-top-up.module';
+import { FareSettingsModule } from './modules/fare-settings/fare-settings.module';
 import { getBaseDatabaseConfig } from './config/database.config';
 
 dotenv.config();
@@ -44,6 +45,7 @@ dotenv.config();
     RideRequestModule,
     WalletModule,
     WalletTopUpModule,
+    FareSettingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

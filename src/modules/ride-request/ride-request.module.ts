@@ -13,6 +13,7 @@ import { RideRequestGateway } from './ride-request.gateway';
 import { ChatMessage } from './entities/chat-message.entity';
 import { ChatService } from './services/chat.service';
 import { DriverLocationService } from './services/driver-location.service';
+import { FareSettingsModule } from '../fare-settings/fare-settings.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { DriverLocationService } from './services/driver-location.service';
     ]),
     AuthModule,
     WalletModule,
+    FareSettingsModule,
   ],
   controllers: [RideRequestController],
   providers: [RideRequestService, RideRequestGateway, ChatService, DriverLocationService],

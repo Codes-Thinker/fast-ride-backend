@@ -29,6 +29,7 @@ import { RideRequest } from '../entities/ride-request.entity';
 import { RideRequestGateway } from '../ride-request.gateway';
 import { ChatService } from './chat.service';
 import { DriverLocationService } from './driver-location.service';
+import { FareSettingsService } from '../../fare-settings/fare-settings.service';
 
 // Ride requests only go to drivers currently within this radius of pickup.
 const RIDE_MATCH_RADIUS_KM = 5;
@@ -51,6 +52,7 @@ export class RideRequestService {
     private readonly chatService: ChatService,
     private readonly walletService: WalletService,
     private readonly driverLocationService: DriverLocationService,
+    private readonly fareSettingsService: FareSettingsService,
   ) {}
 
   async createRideRequest(riderId: string, dto: CreateRideRequestDto) {
@@ -64,11 +66,14 @@ export class RideRequestService {
     const serviceArea: RideServiceArea = dto.serviceArea === 'out_of_city' ? 'out_of_city' : 'city';
     const vehicleType = dto.vehicleType as RideVehicleType;
     const estimatedDistanceKm = this.resolveEstimatedDistanceKm(dto);
+    const fareSettings = await this.fareSettingsService.get();
 
     const fareBreakdown = calculateRideFare({
       vehicleType,
       serviceArea,
       estimatedDistanceKm,
+      cityRates: this.fareSettingsService.cityRates(fareSettings),
+      outOfCityRate: Number(fareSettings.outOfCityPerKm),
     });
 
     const offeredPriceValue = dto.offeredPrice !== undefined ? Number(dto.offeredPrice) : Number(fareBreakdown.totalFare);
@@ -454,6 +459,7 @@ export class RideRequestService {
           });
 
     const serviceArea: RideServiceArea = dto.serviceArea === 'out_of_city' ? 'out_of_city' : 'city';
+    const fareSettings = await this.fareSettingsService.get();
 
     const vehicleTypes: RideVehicleType[] = [
       'bike',
@@ -471,6 +477,8 @@ export class RideRequestService {
           vehicleType: vt,
           serviceArea,
           estimatedDistanceKm,
+          cityRates: this.fareSettingsService.cityRates(fareSettings),
+          outOfCityRate: Number(fareSettings.outOfCityPerKm),
         });
 
         results[vt] = breakdown;

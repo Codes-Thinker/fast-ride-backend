@@ -15,6 +15,7 @@ import { RideRequestModule } from '../ride-request/ride-request.module';
 import { DriverRideAlert } from '../ride-request/entities/driver-ride-alert.entity';
 import { DriverRideResponse } from '../ride-request/entities/driver-ride-response.entity';
 import { ChatMessage } from '../ride-request/entities/chat-message.entity';
+import { FareSettingsModule } from '../fare-settings/fare-settings.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { ChatMessage } from '../ride-request/entities/chat-message.entity';
     AppVersionModule,
     // Provides ChatService and the shared DriverLocationService singleton.
     RideRequestModule,
+    FareSettingsModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, AuditService],

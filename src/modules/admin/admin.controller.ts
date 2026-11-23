@@ -19,6 +19,7 @@ import { AdminService } from './admin.service';
 import { ChangeUserRoleDto } from './dto/change-user-role.dto';
 import { CreditDriverWalletDto } from './dto/credit-driver-wallet.dto';
 import { AppVersionQueryDto, UpdateAppVersionDto } from '../app-version/dto/app-version.dto';
+import { UpdateFareSettingsDto } from '../fare-settings/dto/update-fare-settings.dto';
 
 @Controller('api/admin')
 export class AdminController {
@@ -187,6 +188,20 @@ export class AdminController {
     @Query('search') search?: string,
   ) {
     return this.adminService.listAuditLogs({ page, limit, action, search });
+  }
+
+  @Get('fare-settings')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async getFareSettings() {
+    return this.adminService.getFareSettings();
+  }
+
+  @Put('fare-settings')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @HttpCode(200)
+  async updateFareSettings(@Request() req: any, @Body() dto: UpdateFareSettingsDto) {
+    return this.adminService.updateFareSettings(req.user.id, dto);
   }
 
   @Get('app-version')

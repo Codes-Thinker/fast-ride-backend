@@ -20,6 +20,8 @@ import { AppVersionConfig } from '../app-version/entities/app-version-config.ent
 import { UpdateAppVersionDto } from '../app-version/dto/app-version.dto';
 import { DEFAULT_PLATFORM } from '../app-version/app-version.constants';
 import type { AppPlatform } from '../app-version/app-version.constants';
+import { FareSettingsService } from '../fare-settings/fare-settings.service';
+import { UpdateFareSettingsDto } from '../fare-settings/dto/update-fare-settings.dto';
 
 // Date range start shared by the analytics queries (parameter $1 = number of days).
 // Uses session-local wall-clock time (now()::timestamp) to match `timestamp` columns.
@@ -60,7 +62,24 @@ export class AdminService {
     private readonly chatMessageRepository: Repository<ChatMessage>,
     private readonly chatService: ChatService,
     private readonly driverLocationService: DriverLocationService,
+    private readonly fareSettingsService: FareSettingsService,
   ) {}
+
+  async getFareSettings() {
+    return { config: await this.fareSettingsService.get() };
+  }
+
+  async updateFareSettings(adminId: string, dto: UpdateFareSettingsDto) {
+    const config = await this.fareSettingsService.update(dto, adminId);
+    await this.auditService.log({
+      adminId,
+      action: 'fare_settings.updated',
+      targetType: 'fare_settings',
+      targetId: config.id,
+      metadata: dto as unknown as Record<string, unknown>,
+    });
+    return { message: 'Fare settings updated.', config };
+  }
 
   async getAppVersion(platform?: AppPlatform) {
     const config = await this.appVersionService.getForPlatform(platform ?? DEFAULT_PLATFORM);
