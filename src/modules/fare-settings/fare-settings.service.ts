@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { RideVehicleType } from '../../common/utils/fare-calculator';
@@ -13,8 +13,15 @@ export class FareSettingsService {
   ) {}
 
   async get(): Promise<FareSettings> {
-    const existing = await this.repository.findOne({ where: {} });
-    if (existing) return existing;
+    try {
+      const existing = await this.repository.findOne({ where: {} });
+      if (existing) return existing;
+    } catch (error: unknown) {
+      if ((error as { code?: string })?.code === '42P01') {
+        return this.defaultSettings();
+      }
+      throw error;
+    }
 
     try {
       return await this.repository.save(this.repository.create({}));
@@ -28,10 +35,39 @@ export class FareSettingsService {
   }
 
   async update(dto: UpdateFareSettingsDto, adminId: string): Promise<FareSettings> {
-    const settings = await this.get();
+    let settings: FareSettings;
+    try {
+      settings = await this.get();
+    } catch {
+      throw new BadRequestException('Fare settings migration is not installed');
+    }
+    if (!settings.id || settings.id === 'fare-settings-not-persisted') {
+      throw new BadRequestException('Fare settings migration is not installed');
+    }
     settings.updatedById = adminId;
     Object.assign(settings, dto);
     return this.repository.save(settings);
+  }
+
+  private defaultSettings(): FareSettings {
+    const now = new Date();
+    return this.repository.create({
+      id: 'fare-settings-not-persisted',
+      bikeFirstKm: '50',
+      bikeAfter2Km: '16',
+      rikshawFirstKm: '65',
+      rikshawAfter2Km: '35',
+      carWithoutAcFirstKm: '95',
+      carWithoutAcAfter2Km: '45',
+      carWithAcFirstKm: '95',
+      carWithAcAfter2Km: '45',
+      businessCarFirstKm: '115',
+      businessCarAfter2Km: '55',
+      outOfCityPerKm: '45',
+      updatedById: null,
+      createdAt: now,
+      updatedAt: now,
+    });
   }
 
   cityRates(settings: FareSettings): Record<RideVehicleType, { baseFare: number; afterTwoKm: number }> {

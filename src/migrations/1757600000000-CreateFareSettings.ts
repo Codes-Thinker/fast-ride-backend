@@ -24,7 +24,11 @@ export class CreateFareSettings1757600000000 implements MigrationInterface {
         CONSTRAINT "PK_fare_settings_id" PRIMARY KEY ("id")
       )`,
     );
-    await queryRunner.query(`INSERT INTO "fare_settings" ("id") VALUES (uuid_generate_v4())`);
+    await queryRunner.query(
+      `INSERT INTO "fare_settings" ("id")
+       SELECT uuid_generate_v4()
+       WHERE NOT EXISTS (SELECT 1 FROM "fare_settings")`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
