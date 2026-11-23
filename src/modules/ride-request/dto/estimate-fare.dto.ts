@@ -21,4 +21,10 @@ export class EstimateFareDto {
   @IsOptional()
   @IsIn(['city', 'out_of_city'])
   serviceArea?: string;
+
+  /** Prefer Google road-route distance from the client over haversine. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  estimatedDistanceKm?: number;
 }

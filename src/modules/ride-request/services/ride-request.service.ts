@@ -432,13 +432,26 @@ export class RideRequestService {
     return { alerts: enrichedAlerts };
   }
 
-  async estimateFare(dto: { pickupLatitude: number; pickupLongitude: number; dropoffLatitude: number; dropoffLongitude: number; serviceArea?: string; }) {
-    const estimatedDistanceKm = calculateDistanceKm({
-      pickupLatitude: dto.pickupLatitude,
-      pickupLongitude: dto.pickupLongitude,
-      dropoffLatitude: dto.dropoffLatitude,
-      dropoffLongitude: dto.dropoffLongitude,
-    });
+  async estimateFare(dto: {
+    pickupLatitude: number;
+    pickupLongitude: number;
+    dropoffLatitude: number;
+    dropoffLongitude: number;
+    serviceArea?: string;
+    estimatedDistanceKm?: number;
+  }) {
+    // Prefer client road-route km so estimate matches the map "3.0 km" UI.
+    const estimatedDistanceKm =
+      dto.estimatedDistanceKm !== undefined &&
+      Number.isFinite(dto.estimatedDistanceKm) &&
+      dto.estimatedDistanceKm > 0
+        ? Number(dto.estimatedDistanceKm)
+        : calculateDistanceKm({
+            pickupLatitude: dto.pickupLatitude,
+            pickupLongitude: dto.pickupLongitude,
+            dropoffLatitude: dto.dropoffLatitude,
+            dropoffLongitude: dto.dropoffLongitude,
+          });
 
     const serviceArea: RideServiceArea = dto.serviceArea === 'out_of_city' ? 'out_of_city' : 'city';
 
