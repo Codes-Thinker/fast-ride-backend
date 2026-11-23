@@ -16,7 +16,7 @@ const CITY_TWO_STAGE_RATES: Record<RideVehicleType, { baseFare: number; afterTwo
 };
 
 const OUT_OF_CITY_RATE = 45;
-const CITY_RATE_THRESHOLD_KM = 2;
+const CITY_FIRST_TWO_KM_THRESHOLD_KM = 2;
 const COMPANY_COMMISSION_RATE = 0.15;
 
 export interface FareBreakdown {
@@ -41,10 +41,11 @@ export function calculateRideFare(input: {
 
   const rate = CITY_TWO_STAGE_RATES[input.vehicleType];
   const totalFare =
-    distanceKm <= CITY_RATE_THRESHOLD_KM
-      ? rate.baseFare
+    distanceKm <= CITY_FIRST_TWO_KM_THRESHOLD_KM
+      ? roundMoney(rate.baseFare * distanceKm)
       : roundMoney(
-          rate.baseFare + (distanceKm - CITY_RATE_THRESHOLD_KM) * rate.afterTwoKm,
+          rate.baseFare * CITY_FIRST_TWO_KM_THRESHOLD_KM +
+            (distanceKm - CITY_FIRST_TWO_KM_THRESHOLD_KM) * rate.afterTwoKm,
         );
 
   return buildBreakdown(distanceKm, totalFare);
